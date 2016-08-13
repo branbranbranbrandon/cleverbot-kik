@@ -1,141 +1,171 @@
-#!/usr/bin/env python
+"""An unofficial library to access the Cleverbot API."""
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
+from builtins import str  # pylint: disable=redefined-builtin
+from builtins import object  # pylint: disable=redefined-builtin
 
-import urllib
-import json
-import os
+import collections
+import hashlib
+import requests
+from requests.compat import urlencode
+from future.backports.html import parser
 
-from flask import Flask
-from flask import request
-from flask import make_response
-
-# Flask app should start in global layout
-app = Flask(__name__)
-
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    req = request.get_json(silent=True, force=True)
-
-    print("Request:")
-    print(json.dumps(req, indent=4))
-
-    res = processRequest(req)
-
-    res = json.dumps(res, indent=4)
-    # print(res)
-    r = make_response(res)
-    r.headers['Content-Type'] = 'application/json'
-    return r
+# Only use the instance method `unescape` of entity_parser. (I wish it was a
+# static method or public function; it never uses `self` anyway)
+entity_parser = parser.HTMLParser()
 
 
-def processRequest(req):
-    if req.get("result").get("action") != "yahooWeatherForecast":
-        return {}
-    baseurl = "https://query.yahooapis.com/v1/public/yql?"
-    yql_query = makeYqlQuery(req)
-    if yql_query is None:
-        return {}
-    yql_url = baseurl + urllib.urlencode({'q': yql_query}) + "&format=json"
-    print(yql_url)
+class Cleverbot(object):
+    """Handles a conversation with Cleverbot.
 
-    result = urllib.urlopen(yql_url).read()
-    print("yql result: ")
-    print(result)
+    Example usage:
 
-    data = json.loads(result)
-    res = makeWebhookResult(data)
-    return res
+       >>> from cleverbot import Cleverbot
+       >>> cb = Cleverbot()
+       >>> cb.ask("Hi. How are you?")
+       "I'm good, thanks. How are you?"
+    """
+    HOST = "www.cleverbot.com"
+    PROTOCOL = "http://"
+    RESOURCE = "/webservicemin?uc=165&"
+    API_URL = PROTOCOL + HOST + RESOURCE
 
-
-def makeYqlQuery(req):
-    result = req.get("result")
-    parameters = result.get("parameters")
-    city = parameters.get("geo-city")
-    if city is None:
-        return None
-
-    return "select * from weather.forecast where woeid in (select woeid from geo.places(1) where text='" + city + "')"
-
-
-def makeWebhookResult(data):
-    query = data.get('query')
-    if query is None:
-        return {}
-
-    result = query.get('results')
-    if result is None:
-        return {}
-
-    channel = result.get('channel')
-    if channel is None:
-        return {}
-
-    item = channel.get('item')
-    location = channel.get('location')
-    units = channel.get('units')
-    if (location is None) or (item is None) or (units is None):
-        return {}
-
-    condition = item.get('condition')
-    if condition is None:
-        return {}
-
-    # print(json.dumps(item, indent=4))
-
-    speech = "Today in " + location.get('city') + ": " + condition.get('text') + \
-             ", the temperature is " + condition.get('temp') + " " + units.get('temperature')
-
-    print("Response:")
-    print(speech)
-
-    slack_message = {
-        "text": speech,
-        "attachments": [
-            {
-                "title": channel.get('title'),
-                "title_link": channel.get('link'),
-                "color": "#36a64f",
-
-                "fields": [
-                    {
-                        "title": "Condition",
-                        "value": "Temp " + condition.get('temp') +
-                                 " " + units.get('temperature'),
-                        "short": "false"
-                    },
-                    {
-                        "title": "Wind",
-                        "value": "Speed: " + channel.get('wind').get('speed') +
-                                 ", direction: " + channel.get('wind').get('direction'),
-                        "short": "true"
-                    },
-                    {
-                        "title": "Atmosphere",
-                        "value": "Humidity " + channel.get('atmosphere').get('humidity') +
-                                 " pressure " + channel.get('atmosphere').get('pressure'),
-                        "short": "true"
-                    }
-                ],
-
-                "thumb_url": "http://l.yimg.com/a/i/us/we/52/" + condition.get('code') + ".gif"
-            }
-        ]
+    headers = {
+        'User-Agent': 'Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.0)',
+        'Accept': 'text/html,application/xhtml+xml,'
+                  'application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
+        'Accept-Language': 'en-us,en;q=0.8,en-us;q=0.5,en;q=0.3',
+        'Cache-Control': 'no-cache',
+        'Host': HOST,
+        'Referer': PROTOCOL + HOST + '/',
+        'Pragma': 'no-cache'
     }
 
-    print(json.dumps(slack_message))
+    def __init__(self):
+        """ The data that will get passed to Cleverbot's web API """
+        self.data = collections.OrderedDict(
+            (
+                # must be the first pairs
+                ('stimulus', ''),
+                ('cb_settings_language', ''),
+                ('cb_settings_scripting', 'no'),
+                ('islearning', 1),  # Never modified
+                ('icognoid', 'wsf'),  # Never modified
+                ('icognocheck', ''),
 
-    return {
-        "speech": speech,
-        "displayText": speech,
-        "data": {"slack": slack_message},
-        # "contextOut": [],
-        "source": "apiai-weather-webhook-sample"
-    }
+                ('start', 'y'),  # Never modified
+                ('sessionid', ''),
+                ('vText8', ''),
+                ('vText7', ''),
+                ('vText6', ''),
+                ('vText5', ''),
+                ('vText4', ''),
+                ('vText3', ''),
+                ('vText2', ''),
+                ('fno', 0),  # Never modified
+                ('prevref', ''),
+                ('emotionaloutput', ''),  # Never modified
+                ('emotionalhistory', ''),  # Never modified
+                ('asbotname', ''),  # Never modified
+                ('ttsvoice', ''),  # Never modified
+                ('typing', ''),  # Never modified
+                ('lineref', ''),
+                ('sub', 'Say'),  # Never modified
+                ('cleanslate', False),  # Never modified
+            )
+        )
+
+        # the log of our conversation with Cleverbot
+        self.conversation = []
+
+        # get the main page to get a cookie (see bug #13)
+        self.session = requests.Session()
+        self.session.get(Cleverbot.PROTOCOL + Cleverbot.HOST)
+
+    def ask(self, question):
+        """Asks Cleverbot a question.
+
+        Maintains message history.
+
+        :param question: The question to ask
+        :return Cleverbot's answer
+        """
+
+        # Set the current question
+        self.data['stimulus'] = question
+
+        # Connect to Cleverbot's API and remember the response
+        resp = self._send()
+
+        # Add the current question to the conversation log
+        self.conversation.append(question)
+
+        parsed = self._parse(resp.text)
+
+        # Set data as appropriate
+        if self.data['sessionid'] != '':
+            self.data['sessionid'] = parsed['conversation_id']
+
+        # Add Cleverbot's reply to the conversation log
+        self.conversation.append(parsed['answer'])
+
+        return parsed['answer']
+
+    def _send(self):
+        """POST the user's question and all required information to the
+        Cleverbot API
+
+        Cleverbot tries to prevent unauthorized access to its API by
+        obfuscating how it generates the 'icognocheck' token. The token is
+        currently the md5 checksum of the 10th through 36th characters of the
+        encoded data. This may change in the future.
+
+        TODO: Order is not guaranteed when urlencoding dicts. This hasn't been
+        a problem yet, but let's look into ordered dicts or tuples instead.
+        """
+        # Set data as appropriate
+        if self.conversation:
+            linecount = 1
+            for line in reversed(self.conversation):
+                linecount += 1
+                self.data['vText' + str(linecount)] = line
+                if linecount == 8:
+                    break
+
+        # Generate the token
+        enc_data = urlencode(self.data)
+        digest_txt = enc_data[9:35]
+        token = hashlib.md5(digest_txt.encode('utf-8')).hexdigest()
+        self.data['icognocheck'] = token
+
+        # POST the data to Cleverbot's API and return
+        return self.session.post(Cleverbot.API_URL,
+                                 data=self.data,
+                                 headers=Cleverbot.headers)
+
+    @staticmethod
+    def _parse(resp_text):
+        """Parses Cleverbot's response"""
+        resp_text = entity_parser.unescape(resp_text)
+
+        parsed = [
+            item.split('\r') for item in resp_text.split('\r\r\r\r\r\r')[:-1]
+            ]
+
+        if parsed[0][1] == 'DENIED':
+            raise CleverbotAPIError()
+
+        parsed_dict = {
+            'answer': parsed[0][0],
+            'conversation_id': parsed[0][1],
+        }
+        try:
+            parsed_dict['unknown'] = parsed[1][-1]
+        except IndexError:
+            parsed_dict['unknown'] = None
+        return parsed_dict
 
 
-if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-
-    print "Starting app on port %d" % port
-
-    app.run(debug=False, port=port, host='0.0.0.0')
+class CleverbotAPIError(Exception):
+    """Cleverbot returned an error (it probably recognized us as a bot)"""
