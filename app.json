@@ -1,7 +1,7 @@
 {
-  "name": "API.AI webhook demonstration",
-  "description": "API.AI webhook demonstration",
-  "repository": "https://github.com/xVir/apiai-slack-richformatting",
+  "name": "Cleverbot webhook demonstration",
+  "description": "Cleverbot through Api.ai",
+  "repository": "https://github.com/branbranbranbrandon/cleverbot-kik",
   "logo": "http://xvir.github.io/img/apiai.png",
   "keywords": ["api.ai", "natural language"]
 }
